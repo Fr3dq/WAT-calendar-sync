@@ -222,3 +222,6 @@ __marimo__/
 
 # Generated calendar files
 *.ics
+
+credentials.json
+token.json

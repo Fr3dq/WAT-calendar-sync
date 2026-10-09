@@ -1,9 +1,75 @@
+from datetime import datetime
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
+import os.path
+
+#Google Auth imports
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 url = "https://planzajec.wcy.wat.edu.pl/pl/rozklad?grupa_id=WCY24IJ2S1"
 block_times = {}
 lessons = []
+TIME_ZONE = "Europe/Warsaw"
+
+
+def build_google_event(lesson):
+    start = datetime.strptime(
+        f"{lesson['date']} {lesson['start']}",
+        "%Y_%m_%d %H:%M",
+    )
+    end = datetime.strptime(
+        f"{lesson['date']} {lesson['end']}",
+        "%Y_%m_%d %H:%M",
+    )
+
+    summary = f"{lesson['short_name']} {lesson['class_type']}".strip()
+
+    return {
+        "summary": summary,
+        "location": lesson["room"],
+        "description": f"Teacher code: {lesson['teacher_code']}",
+        "start": {
+            "dateTime": start.isoformat(),
+            "timeZone": TIME_ZONE,
+        },
+        "end": {
+            "dateTime": end.isoformat(),
+            "timeZone": TIME_ZONE,
+        },
+    }
+
+def get_google_calendar_service():
+    credentials = None
+
+    if os.path.exists("token.json"):
+        credentials = Credentials.from_authorized_user_file(
+            "token.json",
+            SCOPES,
+        )
+
+    if credentials is None or not credentials.valid:
+        if credentials is not None and credentials.expired:
+            if credentials.refresh_token:
+                credentials.refresh(Request())
+            else:
+                credentials = None
+
+        if credentials is None:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                "credentials.json",
+                SCOPES,
+            )
+            credentials = flow.run_local_server(port=0)
+
+        with open("token.json", "w", encoding="utf-8") as token_file:
+            token_file.write(credentials.to_json())
+
+    return build("calendar", "v3", credentials=credentials)
 
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=False)
@@ -24,10 +90,6 @@ with sync_playwright() as playwright:
 
 #Parse the HTML string into object that I can work with
 soup = BeautifulSoup(html, "html.parser")
-
-if soup is None:
-    raise RuntimeError("Failed to parse HTML content")
-
 
 for block in soup.select(".block_nr"):
     classes = block.get("class", [])
@@ -89,3 +151,12 @@ for lesson in soup.select(".lesson"):
 
 print("Lessons found:", len(lessons))
 
+google_events = [build_google_event(lesson) for lesson in lessons]
+
+service = get_google_calendar_service()
+
+calendar = service.calendars().get(
+    calendarId="primary",
+).execute()
+
+print("Connected to calendar:", calendar["summary"])
