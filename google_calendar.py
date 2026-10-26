@@ -12,6 +12,7 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 CALENDAR_ID = "primary"
 TIME_ZONE = "Europe/Warsaw"
 SOURCE = "wat-calendar-sync"
+RETRIES = 10
 CREDENTIALS_FILE = Path(__file__).parent / "credentials.json"
 TOKEN_FILE = Path(__file__).parent / "token.json"
 
@@ -63,7 +64,7 @@ def sync_lessons(service: Resource, lessons: list[dict]) -> None:
         privateExtendedProperty=f"source={SOURCE}",
         timeMin=now.astimezone().isoformat(),
         maxResults=2500,
-    ).execute().get("items", [])
+    ).execute(num_retries=RETRIES).get("items", [])
 
     new_events = [build_event(lesson) for lesson in lessons if lesson["end"] > now]
 
@@ -74,10 +75,12 @@ def sync_lessons(service: Resource, lessons: list[dict]) -> None:
     events_to_create = [event for event in new_events if get_key(event) not in old_keys]
 
     for event in events_to_delete:
-        service.events().delete(calendarId=CALENDAR_ID, eventId=event["id"]).execute()
+        request = service.events().delete(calendarId=CALENDAR_ID, eventId=event["id"])
+        request.execute(num_retries=RETRIES)
 
     for event in events_to_create:
-        service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+        request = service.events().insert(calendarId=CALENDAR_ID, body=event)
+        request.execute(num_retries=RETRIES)
 
     print("Deleted events:", len(events_to_delete))
     print("Created events:", len(events_to_create))
