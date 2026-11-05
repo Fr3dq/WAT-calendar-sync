@@ -9,7 +9,7 @@ from googleapiclient.discovery import Resource, build
 
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-CALENDAR_ID = "primary"
+CALENDAR_ID = "c72e065cab5f498b96fbcd21dd4f3efe7b448e806163635d5f2cc487165d5e60@group.calendar.google.com"
 TIME_ZONE = "Europe/Warsaw"
 SOURCE = "wat-calendar-sync"
 RETRIES = 10
@@ -56,6 +56,12 @@ def get_key(event: dict) -> str:
     return event["extendedProperties"]["private"]["key"]
 
 
+def describe(event: dict) -> str:
+    start = event["start"]["dateTime"][:16].replace("T", " ")
+    end = event["end"]["dateTime"][11:16]
+    return f"{start}-{end} {event['summary']} ({event.get('location', '')})"
+
+
 def sync_lessons(service: Resource, lessons: list[dict]) -> None:
     now = datetime.now()
 
@@ -74,13 +80,15 @@ def sync_lessons(service: Resource, lessons: list[dict]) -> None:
     events_to_delete = [event for event in old_events if get_key(event) not in new_keys]
     events_to_create = [event for event in new_events if get_key(event) not in old_keys]
 
-    for event in events_to_delete:
+    for event in sorted(events_to_delete, key=describe):
         request = service.events().delete(calendarId=CALENDAR_ID, eventId=event["id"])
         request.execute(num_retries=RETRIES)
+        print("Removed:", describe(event))
 
-    for event in events_to_create:
+    for event in sorted(events_to_create, key=describe):
         request = service.events().insert(calendarId=CALENDAR_ID, body=event)
         request.execute(num_retries=RETRIES)
+        print("Added:  ", describe(event))
 
     print("Deleted events:", len(events_to_delete))
     print("Created events:", len(events_to_create))

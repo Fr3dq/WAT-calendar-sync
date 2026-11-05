@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from playwright.sync_api import sync_playwright
 
 
@@ -16,7 +16,24 @@ def download_plan_html(url: str) -> str:
     return html
 
 
-def parse_block_times(soup: BeautifulSoup) -> dict[str, tuple[str, str]]:
+WEEKDAYS = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]
+
+
+def is_weekday_label(text: str) -> bool:
+    return text.strip().lower() in WEEKDAYS
+
+
+def find_weekday(block: Tag) -> int | None:
+    # Every weekday has its own table section with its own block hours,
+    # labelled with the weekday name placed before its blocks.
+    label = block.find_previous(string=is_weekday_label)
+    if label is None:
+        return None
+
+    return WEEKDAYS.index(label.strip().lower())
+
+
+def parse_block_times(soup: BeautifulSoup) -> dict[tuple[int | None, str], tuple[str, str]]:
     block_times = {}
 
     for block in soup.select(".block_nr"):
@@ -26,9 +43,10 @@ def parse_block_times(soup: BeautifulSoup) -> dict[str, tuple[str, str]]:
             continue
 
         times = (start.get_text(strip=True), end.get_text(strip=True))
+        weekday = find_weekday(block)
         for class_name in block["class"]:
             if class_name.startswith("block") and class_name != "block_nr":
-                block_times[class_name] = times
+                block_times[(weekday, class_name)] = times
 
     return block_times
 
@@ -49,12 +67,14 @@ def parse_lessons(html: str) -> list[dict]:
 
         date = date_element.get_text(strip=True)
         block_id = block_element.get_text(strip=True)
+        weekday = datetime.strptime(date, "%Y_%m_%d").weekday()
+        times = block_times.get((weekday, block_id)) or block_times.get((None, block_id))
 
-        if block_id not in block_times:
-            print("Skipping lesson with unknown block:", block_id)
+        if times is None:
+            print("Skipping lesson with unknown block:", date, block_id)
             continue
 
-        start, end = block_times[block_id]
+        start, end = times
         lines = name_element.get_text("\n", strip=True).splitlines()
         short_name, class_type, room, teacher_code = (lines + ["", "", "", ""])[:4]
 
